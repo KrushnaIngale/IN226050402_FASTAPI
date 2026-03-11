@@ -1,0 +1,110 @@
+from fastapi import FastAPI, Query 
+from pydantic import BaseModel, Field
+
+app=FastAPI()
+
+# ----Pydantic model-------------------
+class OrderRequest(BaseModel):
+    customer_name:      str=Field(...,min_length=2, max_length=100)
+    product_id:         int=Field(...,gt=0)
+    quantity:           int=Field(...,gt=0, le=100)
+    delivery_address:   str=Field(...,min_length=5, max_length=10)
+
+
+# ----Data-----------------------------
+products = [
+    {'id':1, 'name': 'Wireless Mouse',      'price': 499,  'category': 'Electronics', 'in_stock': True},
+    {'id':2, 'name': 'Notebook',            'price': 99,   'category': 'Stationery',  'in_stock': True},
+    {'id':3, 'name': 'USB Hub',             'price': 799,  'category': 'Electronics', 'in_stock': False},    
+    {'id':4, 'name': 'Pen Set',             'price': 49,   'category': 'Stationery',  'in_stock': True}
+]
+orders = []
+order_counter = 1
+
+# ----Helper Function------------------
+def find_product(product_id: int):
+    for p in products:
+        if p['id']==product_id:
+            return p
+    return None
+
+def calculate_total(product: dict, quantity: int) -> int:
+    return product['price'] * quantity
+
+def filter_products_logic(category=None, min_price=None,max_price=None, in_stock=None):
+    result = products
+    if category is not None:
+        result=[p for p in result if p['category'].lower()==category.lower()]
+    if min_price is not None:
+        result=[p for p in result if p['price']>=min_price]
+    if max_price is not None:
+        result=[p for p in result if p['price']<=max_price]
+    if in_stock is not None:
+        result=[p for p in result if p['in_stock']==in_stock]
+    return result
+
+
+
+
+# ----Endpoints------------------------
+@app.get('/')
+def home():
+    return {'message': 'Welcome to our E-commerce API'}
+
+@app.get('/products')
+def get_all_products():
+    return {'products': products, 'total': len(products)}
+
+@app.get('/products/filter')        #NOTE: must come before /products/{product_id}
+def filter_products(
+    category: str = Query(None),
+    max_price: int = Query(None),
+    in_stock: bool = Query(None)
+):
+    result = products
+    if category:
+        result = [product for product in result if product['category'].lower() == category.lower()]
+    if max_price is not None:
+        result = [product for product in result if product['price'] <= max_price]
+    if in_stock is not none:
+        result = [product for product in result if product['in_stock'] == in_stock]
+    return {'filtered_products': result, 'total_count': len(result)}
+
+@app.get('/products/compare')
+def compare_products(product_id_1: int=Query(...), product_id_2: int=Query(...)):
+    p1=find_product(product_id_1)
+    p2=find_product(product_id_2)
+    if not p1: return {'error': f'Product{product_id_1} not found'}
+    if not p2: return {'error': f'Product{product_id_2} not found'}
+    cheaper = p1 if p1['price'] < p2['price'] else p2
+    # expensive = p1 if p1['price'] > p2['price'] else p2
+    return {'product_1':p1, 'product_2':p2, 'better_value': cheaper, 'price_diff':abs(p1['price']-p2['price'])}
+
+
+@app.get('/products/{product_id}')
+def get_product(product_id: int):
+    for product in products:
+        if product['id'] == product_id:
+            return {'product': product}
+    return {'error': 'Product not found'}
+
+@app.post('/orders')
+def place_order(order_data: OrderRequest):
+    global order_counter
+    product= next((p for p in products if p['id']==order_data.product_id), None)
+    if product is None:
+        return {'error': 'Product not found'}
+    if not product['in_stock']:
+        return {'error': f"{product['name']} iss out of stock"}
+    total_price = product['price'] * order_data.quantity
+    order = {
+        'order_id': order_counter,
+        'customer_name': order_data.customer_name,
+        'product': product['name'],
+        'quantity': order_data.quantity,
+        'delivery_address': order_data.delivery_address,
+        'total_price': total_price
+    }
+    orders.append(order)
+    order_counter += 1
+    return {'message': 'Order placed successfully', 'order':order}
